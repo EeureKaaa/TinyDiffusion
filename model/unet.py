@@ -56,26 +56,34 @@ class UpBlock(nn.Module):
         super().__init__()
         self.time_mlp = nn.Linear(time_emb_dim, out_ch) if time_emb_dim else None
         
-        self.reduce_conv = nn.Conv2d(in_ch, out_ch, 3, padding=1)
+        self.transform = nn.ConvTranspose2d(in_ch, out_ch, 4, 2, 1)
         self.conv = nn.Conv2d(out_ch * 2, out_ch, kernel_size=3, padding=1)
-        self.transform = nn.ConvTranspose2d(out_ch, out_ch, 4, 2, 1)
         
         self.bnorm1 = nn.BatchNorm2d(out_ch)
         self.bnorm2 = nn.BatchNorm2d(out_ch)
         self.relu = nn.ReLU()
 
     def forward(self, x, t=None, residual=None):
-        x = self.relu(self.reduce_conv(x))
+        # Apply the ConvTranspose2d layer for upsampling
+        x = self.relu(self.transform(x))
+        
+        # Concatenate residual if it exists
         if residual is not None:
+            #TODO: dim doesn't match
+            if x.shape[2] != residual.shape[2] or x.shape[3] != residual.shape[3]:
+                x = F.interpolate(x, size=(residual.shape[2], residual.shape[3]), mode='bilinear', align_corners=False)
             x = torch.cat((x, residual), dim=1)
+        
+        # Apply convolution and batch normalization
         x = self.bnorm1(self.relu(self.conv(x)))
         
+        # Time embedding if provided
         if self.time_mlp and t is not None:
             time_emb = self.relu(self.time_mlp(t))
             x = x + time_emb.unsqueeze(-1).unsqueeze(-1)
 
         x = self.bnorm2(x)
-        return self.transform(x)
+        return x
 
 
 class SimpleUnet(nn.Module):

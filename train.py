@@ -7,6 +7,8 @@ from utils.config import is_wandb_ready
 import wandb
 import matplotlib.pyplot as plt
 import numpy as np
+import torch.nn as nn
+from tqdm import tqdm
 
 # Initialize model
 model = SimpleUnet()
@@ -29,8 +31,10 @@ def train():
     # MSE loss
     mse = nn.MSELoss()
     
+    pbar = tqdm(total=config['epochs'])
     # Training loop
     for epoch in range(config['epochs']):
+        running_loss = 0.0
         
         for i, (images, _) in enumerate(train_loader):
             images = images.to(device)
@@ -55,6 +59,7 @@ def train():
             # Update progress bar
             running_loss += loss.item()
             pbar.set_description(f"Epoch {epoch+1}/{config['epochs']}, Loss: {running_loss/(i+1):.6f}")
+            pbar.update(1)
         
         # Save model checkpoint
         if (epoch + 1) % 10 == 0 or epoch == config['epochs'] - 1:
@@ -69,10 +74,13 @@ def train():
     # Final sample generation
     generate_samples(model, config['epochs'], device=device)
     
+    pbar.close()
     # Close wandb
     if use_wandb:
         wandb.finish()
 
+if __name__ == "__main__":
+    train()
             
             
             

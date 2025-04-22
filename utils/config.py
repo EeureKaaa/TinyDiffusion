@@ -1,3 +1,14 @@
+import torch
+import wandb
+
+def is_wandb_ready():
+    try:
+        return wandb is not None and wandb.run is not None
+    except:
+        print("Wandb is not initialized")
+        return False
+        
+
 config = {
     # Dataset parameters
     'dataset': 'MNIST',
@@ -27,3 +38,11 @@ config_update = {
     'sample_grid_path': f'./outputs/{config["dataset"]}/sample_grid/',
 }
 config.update(config_update)
+
+# Wandb configuration
+config['wandb'] = {
+    'project': 'mnist-diffusion',
+    'name': f'{config["dataset"]}_diffusion',
+    'save_code': True,
+}
+

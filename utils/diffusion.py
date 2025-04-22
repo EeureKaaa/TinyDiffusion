@@ -38,14 +38,14 @@ def forward_diffusion_sample(x_0, t, device=config['device']):
     beta_schedule = config['beta_schedule']
     
     if beta_schedule == 'linear':
-        betas = linear_beta_schedule(timesteps, config['beta_start'], config['beta_end'])
+        betas = linear_beta_schedule(timesteps, config['beta_start'], config['beta_end']).to(device)
     elif beta_schedule == 'cosine':
-        betas = cosine_beta_schedule(timesteps, config['s'])
+        betas = cosine_beta_schedule(timesteps, config['s']).to(device)
     
-    alphas=1. - betas
-    alphas_bar=torch.cumprod(alphas, dim=0)
-    sqrt_alphas_bar = torch.sqrt(alphas_bar)
-    sqrt_one_minus_alphas_bar = torch.sqrt(1. - alphas_bar)
+    alphas = (1. - betas).to(device)
+    alphas_bar = torch.cumprod(alphas, dim=0).to(device)
+    sqrt_alphas_bar = torch.sqrt(alphas_bar).to(device)
+    sqrt_one_minus_alphas_bar = torch.sqrt(1. - alphas_bar).to(device)
 
     # Get the values at timestep t
     sqrt_alphas_bar_t = get_index_from_list(sqrt_alphas_bar, t, x_0.shape)
@@ -146,4 +146,3 @@ def p_sample(model, shape, timesteps=config['timesteps'], device=config['device'
 if __name__ == "__main__":
     print(linear_beta_schedule(100, 1e-4, 0.02))
     print(cosine_beta_schedule(timesteps=100, s=0.008))  
-    

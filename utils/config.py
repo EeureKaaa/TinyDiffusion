@@ -3,9 +3,10 @@ import wandb
 
 def is_wandb_ready():
     try:
-        return wandb is not None and wandb.run is not None
-    except:
-        print("Wandb is not initialized")
+        import wandb
+        return True
+    except ImportError:
+        print("Wandb is not installed")
         return False
         
 
@@ -27,7 +28,7 @@ config = {
     'device': torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 
     # Training parameters
-    'epochs': 100,
+    'epochs': 50,
     'learning_rate': 2e-4,
 }
 

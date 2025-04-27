@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn as nn
 from tqdm import tqdm
+import os
 
 # Initialize model
 model = SimpleUnet()
@@ -89,17 +90,21 @@ def train():
         print(f"Epoch {epoch+1}/{config['epochs']} completed. Avg Loss: {avg_loss:.6f}")
         
         # Save model checkpoint
-        if (epoch + 1) % 10 == 0 or epoch == config['epochs'] - 1:
-            torch.save(model.state_dict(), config['model_save_path'])
-            print(f"Model saved to {config['model_save_path']}")
+        if (epoch + 1) % 5 == 0 or epoch == config['epochs'] - 1:
+            # Create checkpoint directory if it doesn't exist
+            checkpoint_dir = os.path.dirname(config['model_save_path'])
+            if not os.path.exists(checkpoint_dir):
+                os.makedirs(checkpoint_dir)
+                print(f"Created directory: {checkpoint_dir}")
             
-            # Generate and save sample images
-            generate_samples(model, epoch, device=device)
+            # Create a filename with the epoch number
+            model_filename = f"{config['dataset']}_diffusion_model_epoch_{epoch+1}.pt"
+            model_path = os.path.join(checkpoint_dir, model_filename, exist_ok=True)
+            
+            torch.save(model.state_dict(), model_path)
+            print(f"Model saved to {model_path}")            
     
     print("Training completed!")
-    
-    # Final sample generation
-    generate_samples(model, config['epochs'], device=device)
     
     # Close wandb
     if use_wandb:

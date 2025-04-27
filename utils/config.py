@@ -28,7 +28,7 @@ config = {
     'device': torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 
     # Training parameters
-    'epochs': 50,
+    'epochs': 10,
     'learning_rate': 2e-4,
 }
 

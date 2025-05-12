@@ -18,7 +18,7 @@ config = {
     'channels': 1,  # MNIST is grayscale
 
     # Noise schedule parameters
-    'beta_schedule': 'linear',
+    'beta_schedule': 'cosine',
     'beta_start': 1e-4,
     'beta_end': 0.02,
     's': 0.008,
@@ -28,8 +28,9 @@ config = {
     'device': torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 
     # Training parameters
-    'epochs': 10,
+    'epochs': 50,
     'learning_rate': 2e-4,
+    'save_interval': 5
 }
 
 # Paths for saving models and outputs

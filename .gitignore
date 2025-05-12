@@ -1,0 +1,14 @@
+# checkpoint
+checkpoints
+
+# output
+outputs
+
+# data
+data
+
+# cache
+*/__pycache__
+
+# log
+wandb

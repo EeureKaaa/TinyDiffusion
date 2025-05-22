@@ -31,8 +31,8 @@ TinyDiffusion is a compact implementation of a diffusion model trained on the MN
 
 2. Install dependencies:
    ```
-   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
    pip install -e .
+   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
    ```
 
 ## Usage

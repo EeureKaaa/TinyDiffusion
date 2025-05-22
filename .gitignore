@@ -12,3 +12,6 @@ data
 
 # log
 wandb
+
+# egg-info
+*.egg-info

@@ -24,7 +24,7 @@ config = {
     's': 0.008,
 
     # Diffusion parameters
-    'timesteps': 500,
+    'timesteps': 100,
     'device': torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 
     # Training parameters

@@ -25,9 +25,11 @@ def generate_images(checkpoint_path, num_images=4, batch_size=2, show=True, seed
         checkpoint_path: Path to the model checkpoint
         num_images: Number of images to generate
         batch_size: Batch size for generation
-        save_dir: Directory to save generated images
         show: Whether to display the generated images
         seed: Random seed for reproducibility
+        use_ddim: Whether to use DDIM sampling
+        ddim_steps: Number of DDIM sampling steps
+        ddim_eta: DDIM eta parameter
     """
     # Set random seed if provided
     if seed is not None:
@@ -77,38 +79,36 @@ def generate_images(checkpoint_path, num_images=4, batch_size=2, show=True, seed
         # Print statistics about the generated samples
         print(f"Sample stats - min: {samples.min().item()}, max: {samples.max().item()}, mean: {samples.mean().item()}, std: {samples.std().item()}")
         
-        # Convert to numpy for plotting
-        samples = samples.cpu().numpy()
-        generated_images.append(samples)
+        # Process samples like in save_real_images
+        import torch.nn.functional as F
         
-        # # Save raw samples for debugging
-        # if save_dir:
-        #     raw_dir = Path(save_dir) / "raw"
-        #     raw_dir.mkdir(parents=True, exist_ok=True)
-        #     for i in range(current_batch):
-        #         raw_img = samples[i].transpose(1, 2, 0).squeeze()
-        #         plt.figure(figsize=(5, 5))
-        #         plt.imshow(raw_img, cmap='gray')
-        #         plt.title(f"Raw Output\nMin: {raw_img.min():.4f}, Max: {raw_img.max():.4f}")
-        #         plt.colorbar()
-        #         plt.savefig(raw_dir / f"raw_sample_{num_images - remaining + i}.png")
-        #         plt.close()
+        # Convert to CPU tensor first
+        samples = samples.cpu()
+        
+        # Convert to 3 channels and resize to 299x299 (FID standard size)
+        samples = samples.repeat(1, 3, 1, 1)  # [N, 1, H, W] -> [N, 3, H, W]
+        samples = F.interpolate(samples, size=(299, 299), mode='bilinear')  # Resize to 299x299
+        
+        # Normalize to [0, 1]
+        samples = (samples - samples.min()) / (samples.max() - samples.min())
+        
+        # Convert to numpy and store for grid display
+        samples_np = samples.numpy()
+        generated_images.append(samples_np)
         
         # Save individual images if requested
         if save_dir:
             for i in range(current_batch):
                 img_idx = num_images - remaining + i
-                img = samples[i].transpose(1, 2, 0).squeeze()
                 
-                # Normalize to [0, 1] range with safeguards
-                # img = normalize_image(img)
+                # Convert to numpy for saving (CHW -> HWC)
+                img_np = samples_np[i].transpose(1, 2, 0)
                 
                 # Save the image
                 plt.figure(figsize=(5, 5))
-                plt.imshow(img, cmap='gray')
+                plt.imshow(img_np)  # No cmap for RGB images
                 plt.axis('off')
-                plt.tight_layout(pad=0)
-                plt.savefig(save_path / f"sample_{img_idx}.png", bbox_inches='tight', pad_inches=0)
+                plt.savefig(save_path / f"sample_{img_idx:04d}.png", bbox_inches='tight', pad_inches=0)
                 plt.close()
         
         remaining -= current_batch
@@ -128,10 +128,9 @@ def generate_images(checkpoint_path, num_images=4, batch_size=2, show=True, seed
             ax.axis('off')
             
             if i < num_images:
-                img = all_samples[i].transpose(1, 2, 0).squeeze()
-                # Normalize to [0, 1] range with safeguards
-                # img = normalize_image(img)
-                ax.imshow(img, cmap='gray')
+                # Use the processed RGB images
+                img = all_samples[i].transpose(1, 2, 0)  # CHW -> HWC
+                ax.imshow(img)  # No cmap for RGB images
         
         plt.tight_layout()
         
@@ -442,8 +441,8 @@ def evaluate_fid_2(real_dir, generated_dir, checkpoint_path=None, num_images=64,
 def main():
     parser = argparse.ArgumentParser(description="Generate images using a trained diffusion model")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to the model checkpoint")
-    parser.add_argument("--num_images", type=int, default=4, help="Number of images to generate")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for generation")
+    parser.add_argument("--num_images", type=int, default=500, help="Number of images to generate")
+    parser.add_argument("--batch_size", type=int, default=64, help="Batch size for generation")
     parser.add_argument("--save_dir", type=str, default="./outputs/generated", help="Directory to save generated images")
     parser.add_argument("--no_show", action="store_true", help="Don't display the generated images")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
@@ -456,7 +455,7 @@ def main():
     parser.add_argument("--real_dir", type=str, help="Directory containing real images for FID evaluation")
     parser.add_argument("--generated_dir", type=str, help="Directory containing generated images for FID evaluation")
     parser.add_argument("--save_real", action="store_true", help="Save real images from test dataset")
-    parser.add_argument("--real_images", type=int, default=64, help="Number of real images to save")
+    parser.add_argument("--real_images", type=int, default=500, help="Number of real images to save")
     
     args = parser.parse_args()
     

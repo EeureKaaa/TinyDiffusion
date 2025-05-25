@@ -9,9 +9,10 @@ from datetime import datetime
 from model.unet import SimpleUnet
 from utils.config import config
 from utils.diffusion import p_sample, forward_diffusion_sample, reverse_diffusion_sample
-from utils.dataload import get_data_loaders
+from utils.dataload import get_data_loaders, ensure_directory_exists
 from utils.image_utils import normalize_image
 from utils.ddim import ddim_sample
+from utils.fid_utils import calculate_fid, calculate_fid_from_dirs
 
 
 def generate_images(checkpoint_path, num_images=4, batch_size=2, show=True, seed=None, use_ddim=False, ddim_steps=50, ddim_eta=0.0):
@@ -33,7 +34,7 @@ def generate_images(checkpoint_path, num_images=4, batch_size=2, show=True, seed
 
     now = datetime.now()
     timestamp_str = now.strftime("%Y%m%d_%H%M%S")
-    save_dir = f"./outputs/generated/{timestamp_str}"
+    save_dir = f"{config['generated_images_path']}/{timestamp_str}"
     
     device = config['device']
     print(f"Using device: {device}")
@@ -234,172 +235,211 @@ def generate_interpolation(checkpoint_path, steps=10, show=True, seed=None):
     print(f"Generated interpolation with {steps} steps successfully!")
     return samples
 
-def reconstruction(checkpoint_path, show=True, seed=None):
-    """    
-    Reconstruct original images by running the diffusion process forward and then backward
+
+def save_real_images(output_dir, num_images=64, batch_size=32, seed=None):
+    """
+    Save real images from the test dataloader for FID evaluation.
     
     Args:
-        checkpoint_path: Path to the model checkpoint
-        save_dir: Directory to save reconstructed images
-        show: Whether to display the reconstructed images
+        output_dir: Directory to save the real images
+        num_images: Number of images to save
+        batch_size: Batch size for loading data
         seed: Random seed for reproducibility
     """
     # Set random seed if provided
     if seed is not None:
         torch.manual_seed(seed)
         np.random.seed(seed)
+    
+    # Create output directory
+    save_path = Path(output_dir)
+    save_path.mkdir(parents=True, exist_ok=True)
+    
+    # Get test dataloader
+    _, test_loader = get_data_loaders(batch_size=batch_size)
+    
+    # Save images
+    print(f"Saving {num_images} real images to {output_dir}...")
+    
+    img_count = 0
+    for batch, _ in test_loader:
+        for img in batch:
+            if img_count >= num_images:
+                break
+                
+            # Convert to numpy and normalize
+            img_np = img.numpy().transpose(1, 2, 0).squeeze()
+            
+            # Save the image
+            plt.figure(figsize=(5, 5))
+            plt.imshow(img_np, cmap='gray')
+            plt.axis('off')
+            plt.savefig(save_path / f"real_{img_count:04d}.png", bbox_inches='tight', pad_inches=0)
+            plt.close()
+            
+            img_count += 1
+            
+            if img_count >= num_images:
+                break
+    
+    print(f"Saved {img_count} real images to {output_dir}")
 
-    now = datetime.now()
-    timestamp_str = now.strftime("%Y%m%d_%H%M%S")
-    save_dir = f'./outputs/reconstruction/{timestamp_str}'
-    
-    device = config['device']
-    print(f"Using device: {device}")
-    
-    # Initialize model
-    model = SimpleUnet()
-    
-    # Load checkpoint
-    print(f"Loading checkpoint from {checkpoint_path}")
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-    model.to(device)
-    model.eval()
 
-    # Create save directory if needed
-    if save_dir:
-        save_path = Path(save_dir)
+def evaluate_fid(real_dir, generated_dir=None, checkpoint_path=None, num_images=64, batch_size=4, seed=None, use_ddim=False, ddim_steps=50, ddim_eta=0.0):
+    """
+    Evaluate the quality of generated images using Fréchet Inception Distance (FID).
+    
+    Args:
+        real_dir: Directory containing real images for comparison
+        generated_dir: Directory containing pre-generated images to evaluate (if None, will generate new images)
+        checkpoint_path: Path to the model checkpoint (required if generated_dir is None)
+        num_images: Number of images to generate (if generated_dir is None)
+        batch_size: Batch size for generation and FID calculation
+        seed: Random seed for reproducibility
+        use_ddim: Whether to use DDIM sampling for generation
+        ddim_steps: Number of DDIM sampling steps
+        ddim_eta: DDIM eta parameter
+        
+    Returns:
+        fid_score: The calculated FID score (lower is better)
+    """
+    # Check if we need to generate images first
+    if generated_dir is None:
+        if checkpoint_path is None:
+            raise ValueError("Either generated_dir or checkpoint_path must be provided")
+        
+        # Generate images
+        print(f"Generating {num_images} images for FID evaluation...")
+        
+        # Set random seed if provided
+        if seed is not None:
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+
+        now = datetime.now()
+        timestamp_str = now.strftime("%Y%m%d_%H%M%S")
+        generated_dir = f"./outputs/fid_evaluation/{timestamp_str}"
+        
+        device = config['device']
+        print(f"Using device: {device}")
+        
+        # Initialize model
+        model = SimpleUnet()
+        
+        # Load checkpoint
+        print(f"Loading checkpoint from {checkpoint_path}")
+        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+        model.to(device)
+        model.eval()
+        
+        # Create save directory
+        save_path = Path(generated_dir)
         save_path.mkdir(parents=True, exist_ok=True)
-
-    # Get test data
-    _, test_loader = get_data_loaders(batch_size=1000)
-
-    with torch.no_grad():
-        data, labels = next(iter(test_loader))
-        data = data.to(device)
         
-        # Create a list to store one example of each digit
-        selected_digits = []
-        selected_data_list = []
-        selected_indices = []
-
-        # Find one example of each digit (0-9)
-        for digit in range(10):
-            indices = (labels == digit).nonzero(as_tuple=True)[0]
-            if len(indices) == 0:
-                print(f"No example of digit {digit} found in current batch")
-                continue
-
-            # Take the first example of this digit
-            idx = indices[0].item()
-            selected_digits.append(digit)
-            selected_data_list.append(data[idx].unsqueeze(0))  # Add batch dimension back
-            selected_indices.append(idx)
+        # Generate images in batches
+        remaining = num_images
+        img_idx = 0
         
-        # # Concatenate all selected digits
-        # selected_data = torch.cat(selected_data_list, dim=0)
+        while remaining > 0:
+            current_batch = min(batch_size, remaining)
+            print(f"Generating batch of {current_batch} images...")
+            
+            # Generate images
+            sample_shape = (current_batch, config['channels'], config['image_size'], config['image_size'])
+            
+            with torch.no_grad():
+                if use_ddim:
+                    print(f"Using DDIM sampling with {ddim_steps} steps and eta={ddim_eta}")
+                    samples, _ = ddim_sample(model, sample_shape, timesteps=config['timesteps'], 
+                                           device=device, eta=ddim_eta, sampling_steps=ddim_steps)
+                else:
+                    samples, _ = p_sample(model, sample_shape, timesteps=config['timesteps'], device=device)
+            
+            # Convert to numpy for saving
+            samples = samples.cpu().numpy()
+            
+            # Save individual images
+            for i in range(current_batch):
+                img = samples[i].transpose(1, 2, 0).squeeze()
+                
+                # Save the image
+                plt.figure(figsize=(5, 5))
+                plt.imshow(img, cmap='gray')
+                plt.axis('off')
+                plt.savefig(save_path / f"gen_{img_idx:04d}.png", bbox_inches='tight', pad_inches=0)
+                plt.close()
+                
+                img_idx += 1
+            
+            remaining -= current_batch
         
-        # Forward diffusion process (add noise)
-        noisy_images = []
-        original_images = []
-        reconstructed_images = []
-        
-        print("Running forward diffusion process...")
-        for img_idx, img in enumerate(selected_data_list):
-            # img = img.unsqueeze(0)  # Add batch dimension
-            original_images.append(img.cpu().numpy())
-            
-            # Apply forward diffusion with maximum noise (t=999)
-            t = torch.tensor([999], device=device)
-            noisy_img, _ = forward_diffusion_sample(img, t, device)
-            noisy_images.append(noisy_img.cpu().numpy())
-            
-            # Now run the reverse diffusion process to reconstruct
-            print(f"Reconstructing digit {selected_digits[img_idx]}...")
-            current_img = noisy_img.clone()
-
-            # Perform the reverse diffusion process
-            for i in reversed(range(0, config['timesteps'])):
-                t = torch.tensor([i], device=device)
-                current_img = reverse_diffusion_sample(model, current_img, t)
-                # current_img = model(current_img, t)
-            
-            reconstructed_images.append(current_img.cpu().numpy())
-        
-        # Convert to numpy arrays
-        original_images = np.concatenate(original_images, axis=0)
-        noisy_images = np.concatenate(noisy_images, axis=0)
-        reconstructed_images = np.concatenate(reconstructed_images, axis=0)
-        
-        # Show results if requested
-        if show:
-            num_digits = len(selected_digits)
-            fig, axes = plt.subplots(3, num_digits, figsize=(2*num_digits, 6))
-            
-            # Plot original images
-            for i in range(num_digits):
-                img = original_images[i].transpose(1, 2, 0).squeeze()
-                img = normalize_image(img)
-                axes[0, i].imshow(img, cmap='gray')
-                axes[0, i].set_title(f"Original {selected_digits[i]}")
-                axes[0, i].axis('off')
-            
-            # Plot noisy images
-            for i in range(num_digits):
-                img = noisy_images[i].transpose(1, 2, 0).squeeze()
-                img = normalize_image(img)
-                axes[1, i].imshow(img, cmap='gray')
-                axes[1, i].set_title(f"Noisy")
-                axes[1, i].axis('off')
-            
-            # Plot reconstructed images
-            for i in range(num_digits):
-                img = reconstructed_images[i].transpose(1, 2, 0).squeeze()
-                img = normalize_image(img)
-                axes[2, i].imshow(img, cmap='gray')
-                axes[2, i].set_title(f"Reconstructed")
-                axes[2, i].axis('off')
-            
-            plt.tight_layout()
-            
-            # Save figure if requested
-            if save_dir:
-                recon_path = save_path / "reconstruction.png"
-                plt.savefig(recon_path)
-                print(f"Saved reconstruction visualization to {recon_path}")
-            
-            plt.show()
+        print(f"Generated {num_images} images for FID evaluation in {generated_dir}")
     
-    print(f"Reconstructed {len(selected_digits)} digit images successfully!")
-    return original_images, noisy_images, reconstructed_images
+    # Calculate FID
+    print(f"Calculating FID between real images in {real_dir} and generated images in {generated_dir}...")
+    fid_score = calculate_fid_from_dirs(real_dir, generated_dir, batch_size=batch_size, device=config['device'])
+    
+    print(f"FID Score: {fid_score:.4f} (lower is better)")
+    return fid_score
 
 
 def main():
     parser = argparse.ArgumentParser(description="Generate images using a trained diffusion model")
-    parser.add_argument("--checkpoint", type=str, required=True, help="Path to the model checkpoint")
+    parser.add_argument("--checkpoint", type=str, default=None, help="Path to the model checkpoint")
     parser.add_argument("--num_images", type=int, default=4, help="Number of images to generate")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size for generation")
     parser.add_argument("--save_dir", type=str, default="./outputs/generated", help="Directory to save generated images")
     parser.add_argument("--no_show", action="store_true", help="Don't display the generated images")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     parser.add_argument("--interpolation", action="store_true", help="Generate interpolation between two latent vectors")
-    parser.add_argument("--reconstruction", action="store_true", help="Reconstruct digit images from the test set")
     parser.add_argument("--steps", type=int, default=50, help="Number of interpolation steps")
     parser.add_argument("--use_ddim", action="store_true", help="Use DDIM sampling for higher quality generation")
     parser.add_argument("--ddim_steps", type=int, default=10, help="Number of DDIM sampling steps")
     parser.add_argument("--ddim_eta", type=float, default=0.0, help="DDIM eta parameter (0.0 = deterministic, 1.0 = DDPM)")
+    parser.add_argument("--evaluate_fid", action="store_true", help="Evaluate generated images using FID")
+    parser.add_argument("--real_dir", type=str, help="Directory containing real images for FID evaluation")
+    parser.add_argument("--generated_dir", type=str, help="Directory containing generated images for FID evaluation")
+    parser.add_argument("--save_real", action="store_true", help="Save real images from test dataset")
+    parser.add_argument("--real_images", type=int, default=100, help="Number of real images to save")
     
     args = parser.parse_args()
     
-    if args.interpolation:
+    if args.save_real:
+        # Create a timestamped directory for real images
+        now = datetime.now()
+        timestamp_str = now.strftime("%Y%m%d_%H%M%S")
+        real_dir = f"./outputs/real_images/{timestamp_str}"
+        
+        # Save real images
+        save_real_images(
+            output_dir=real_dir,
+            num_images=args.real_images,
+            batch_size=args.batch_size,
+            seed=args.seed
+        )
+        
+        print(f"Real images saved to: {real_dir}")
+        print(f"You can use this directory for FID evaluation with: --real_dir {real_dir}")
+        
+    elif args.evaluate_fid:
+        if args.real_dir is None:
+            parser.error("--real_dir is required when using --evaluate_fid")
+        
+        evaluate_fid(
+            real_dir=args.real_dir,
+            generated_dir=args.generated_dir,
+            checkpoint_path=args.checkpoint if args.generated_dir is None else None,
+            num_images=args.num_images,
+            batch_size=args.batch_size,
+            seed=args.seed,
+            use_ddim=args.use_ddim,
+            ddim_steps=args.ddim_steps,
+            ddim_eta=args.ddim_eta
+        )
+    elif args.interpolation:
         generate_interpolation(
             checkpoint_path=args.checkpoint,
             steps=args.steps,
-            show=not args.no_show,
-            seed=args.seed
-        )
-    elif args.reconstruction:
-        reconstruction(
-            checkpoint_path=args.checkpoint,
             show=not args.no_show,
             seed=args.seed
         )

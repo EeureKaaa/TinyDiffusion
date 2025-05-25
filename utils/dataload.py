@@ -23,3 +23,11 @@ def get_data_loaders(batch_size=None):
 
     return train_loader, test_loader
     
+    
+# Create directories if they don't exist
+def ensure_directory_exists(file_path):
+    """Create the directory for a file path if it doesn't exist"""
+    directory = os.path.dirname(file_path)
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory)
+        print(f"Created directory: {directory}")

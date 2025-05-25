@@ -263,18 +263,28 @@ def save_real_images(output_dir, num_images=64, batch_size=32, seed=None):
     # Save images
     print(f"Saving {num_images} real images to {output_dir}...")
     
+    import torch.nn.functional as F
+    
     img_count = 0
     for batch, _ in test_loader:
-        for img in batch:
+        # Process entire batch at once for efficiency
+        # Convert to 3 channels and resize
+        images = batch.repeat(1, 3, 1, 1)  # [N, 1, H, W] -> [N, 3, H, W]
+        images = F.interpolate(images, size=(299, 299), mode='bilinear')  # Resize to 512x512
+        
+        # Normalize to [0, 1]
+        images = (images - images.min()) / (images.max() - images.min())
+        
+        for img in images:
             if img_count >= num_images:
                 break
                 
-            # Convert to numpy and normalize
-            img_np = img.numpy().transpose(1, 2, 0).squeeze()
+            # Convert to numpy for saving
+            img_np = img.numpy().transpose(1, 2, 0)
             
             # Save the image
             plt.figure(figsize=(5, 5))
-            plt.imshow(img_np, cmap='gray')
+            plt.imshow(img_np)
             plt.axis('off')
             plt.savefig(save_path / f"real_{img_count:04d}.png", bbox_inches='tight', pad_inches=0)
             plt.close()
@@ -357,16 +367,26 @@ def evaluate_fid(real_dir, generated_dir=None, checkpoint_path=None, num_images=
                 else:
                     samples, _ = p_sample(model, sample_shape, timesteps=config['timesteps'], device=device)
             
+            # Process for FID calculation
+            import torch.nn.functional as F
+            
+            # Convert to 3 channels and resize
+            samples = samples.repeat(1, 3, 1, 1)  # [N, 1, H, W] -> [N, 3, H, W]
+            samples = F.interpolate(samples, size=(299, 299), mode='bilinear')  # Resize to 512x512
+            
+            # Normalize to [0, 1]
+            samples = (samples - samples.min()) / (samples.max() - samples.min())
+            
             # Convert to numpy for saving
             samples = samples.cpu().numpy()
             
             # Save individual images
             for i in range(current_batch):
-                img = samples[i].transpose(1, 2, 0).squeeze()
+                img = samples[i].transpose(1, 2, 0)
                 
                 # Save the image
                 plt.figure(figsize=(5, 5))
-                plt.imshow(img, cmap='gray')
+                plt.imshow(img)
                 plt.axis('off')
                 plt.savefig(save_path / f"gen_{img_idx:04d}.png", bbox_inches='tight', pad_inches=0)
                 plt.close()

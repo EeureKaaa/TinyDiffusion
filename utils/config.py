@@ -24,7 +24,7 @@ config = {
     's': 0.008,
 
     # Diffusion parameters
-    'timesteps': 1000,
+    'timesteps': 500,
     'device': torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 
     # Training parameters
@@ -35,9 +35,9 @@ config = {
 
 # Paths for saving models and outputs
 config_update = {
-    'model_save_path': f'./checkpoints/{config["dataset"]}_diffusion_model.pt',
-    'generated_images_path': f'./outputs/{config["dataset"]}/generated/',
-    'sample_grid_path': f'./outputs/{config["dataset"]}/sample_grid/',
+    'model_save_path': f'./checkpoints/{config["dataset"]}_{config["beta_schedule"]}_{config["timesteps"]}/diffusion_model.pt',
+    'generated_images_path': f'./outputs/{config["dataset"]}_{config["beta_schedule"]}_{config["timesteps"]}/generated/',
+    'sample_grid_path': f'./outputs/{config["dataset"]}_{config["beta_schedule"]}_{config["timesteps"]}/sample_grid/',
 }
 config.update(config_update)
 

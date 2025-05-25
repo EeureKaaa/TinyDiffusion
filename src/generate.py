@@ -13,6 +13,8 @@ from utils.dataload import get_data_loaders, ensure_directory_exists
 from utils.image_utils import normalize_image
 from utils.ddim import ddim_sample
 from utils.fid_utils import calculate_fid, calculate_fid_from_dirs
+from torch_fidelity import calculate_metrics
+
 
 
 def generate_images(checkpoint_path, num_images=4, batch_size=2, show=True, seed=None, use_ddim=False, ddim_steps=50, ddim_eta=0.0):
@@ -382,6 +384,40 @@ def evaluate_fid(real_dir, generated_dir=None, checkpoint_path=None, num_images=
     print(f"FID Score: {fid_score:.4f} (lower is better)")
     return fid_score
 
+def evaluate_fid_2(real_dir, generated_dir, checkpoint_path=None, num_images=64, batch_size=4, seed=None, use_ddim=False, ddim_steps=50, ddim_eta=0.0):
+    # Calculate FID
+    use_cuda = torch.cuda.is_available()
+    if use_cuda:
+        print("Calculating FID score using GPU...")
+    else:
+        print("Calculating FID score using CPU...")
+        
+    metrics = calculate_metrics(
+        input1=real_dir,
+        input2=generated_dir,
+        cuda=use_cuda,
+        fid=True,
+        verbose=True
+    )
+    
+    # The key is 'frechet_inception_distance' not 'fid'
+    fid_score = metrics['frechet_inception_distance']
+    print(f"FID Score: {fid_score:.4f}")
+
+    # # store json for fid score
+    # if fid_score:
+    #     timestamp = time.strftime("%Y%m%d-%H%M%S")
+    #     fid_score = {
+    #         'model_path': args.model_path,
+    #         'num_images': num_images,
+    #         'fid_score': fid_score,
+    #         'timestamp': timestamp
+    #     }
+    #     with open(config['fid_score_path'] + f'/fid_score_{timestamp}.json', 'w') as f:
+    #         json.dump(fid_score, f, indent=4)
+    
+    return fid_score
+
 
 def main():
     parser = argparse.ArgumentParser(description="Generate images using a trained diffusion model")
@@ -400,15 +436,13 @@ def main():
     parser.add_argument("--real_dir", type=str, help="Directory containing real images for FID evaluation")
     parser.add_argument("--generated_dir", type=str, help="Directory containing generated images for FID evaluation")
     parser.add_argument("--save_real", action="store_true", help="Save real images from test dataset")
-    parser.add_argument("--real_images", type=int, default=100, help="Number of real images to save")
+    parser.add_argument("--real_images", type=int, default=64, help="Number of real images to save")
     
     args = parser.parse_args()
     
     if args.save_real:
         # Create a timestamped directory for real images
-        now = datetime.now()
-        timestamp_str = now.strftime("%Y%m%d_%H%M%S")
-        real_dir = f"./outputs/real_images/{timestamp_str}"
+        real_dir = f"./outputs/real_images"
         
         # Save real images
         save_real_images(
@@ -425,11 +459,11 @@ def main():
         if args.real_dir is None:
             parser.error("--real_dir is required when using --evaluate_fid")
         
-        evaluate_fid(
+        evaluate_fid_2(
             real_dir=args.real_dir,
             generated_dir=args.generated_dir,
             checkpoint_path=args.checkpoint if args.generated_dir is None else None,
-            num_images=args.num_images,
+            num_images=args.real_images,
             batch_size=args.batch_size,
             seed=args.seed,
             use_ddim=args.use_ddim,

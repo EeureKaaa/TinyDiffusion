@@ -8,6 +8,9 @@ results_dif
 
 # data
 data
+gan_imgs
+gan_imgs_processed
+gan_imgs_processed_28
 
 # cache
 */__pycache__

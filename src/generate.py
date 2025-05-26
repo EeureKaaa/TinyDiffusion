@@ -12,7 +12,6 @@ from utils.diffusion import p_sample, forward_diffusion_sample, reverse_diffusio
 from utils.dataload import get_data_loaders, ensure_directory_exists
 from utils.image_utils import normalize_image
 from utils.ddim import ddim_sample
-from utils.fid_utils import calculate_fid, calculate_fid_from_dirs
 from torch_fidelity import calculate_metrics
 
 
@@ -295,115 +294,7 @@ def save_real_images(output_dir, num_images=64, batch_size=32, seed=None):
     
     print(f"Saved {img_count} real images to {output_dir}")
 
-
-def evaluate_fid(real_dir, generated_dir=None, checkpoint_path=None, num_images=64, batch_size=4, seed=None, use_ddim=False, ddim_steps=50, ddim_eta=0.0):
-    """
-    Evaluate the quality of generated images using Fréchet Inception Distance (FID).
-    
-    Args:
-        real_dir: Directory containing real images for comparison
-        generated_dir: Directory containing pre-generated images to evaluate (if None, will generate new images)
-        checkpoint_path: Path to the model checkpoint (required if generated_dir is None)
-        num_images: Number of images to generate (if generated_dir is None)
-        batch_size: Batch size for generation and FID calculation
-        seed: Random seed for reproducibility
-        use_ddim: Whether to use DDIM sampling for generation
-        ddim_steps: Number of DDIM sampling steps
-        ddim_eta: DDIM eta parameter
-        
-    Returns:
-        fid_score: The calculated FID score (lower is better)
-    """
-    # Check if we need to generate images first
-    if generated_dir is None:
-        if checkpoint_path is None:
-            raise ValueError("Either generated_dir or checkpoint_path must be provided")
-        
-        # Generate images
-        print(f"Generating {num_images} images for FID evaluation...")
-        
-        # Set random seed if provided
-        if seed is not None:
-            torch.manual_seed(seed)
-            np.random.seed(seed)
-
-        now = datetime.now()
-        timestamp_str = now.strftime("%Y%m%d_%H%M%S")
-        generated_dir = f"./outputs/fid_evaluation/{timestamp_str}"
-        
-        device = config['device']
-        print(f"Using device: {device}")
-        
-        # Initialize model
-        model = SimpleUnet()
-        
-        # Load checkpoint
-        print(f"Loading checkpoint from {checkpoint_path}")
-        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-        model.to(device)
-        model.eval()
-        
-        # Create save directory
-        save_path = Path(generated_dir)
-        save_path.mkdir(parents=True, exist_ok=True)
-        
-        # Generate images in batches
-        remaining = num_images
-        img_idx = 0
-        
-        while remaining > 0:
-            current_batch = min(batch_size, remaining)
-            print(f"Generating batch of {current_batch} images...")
-            
-            # Generate images
-            sample_shape = (current_batch, config['channels'], config['image_size'], config['image_size'])
-            
-            with torch.no_grad():
-                if use_ddim:
-                    print(f"Using DDIM sampling with {ddim_steps} steps and eta={ddim_eta}")
-                    samples, _ = ddim_sample(model, sample_shape, timesteps=config['timesteps'], 
-                                           device=device, eta=ddim_eta, sampling_steps=ddim_steps)
-                else:
-                    samples, _ = p_sample(model, sample_shape, timesteps=config['timesteps'], device=device)
-            
-            # Process for FID calculation
-            import torch.nn.functional as F
-            
-            # Convert to 3 channels and resize
-            samples = samples.repeat(1, 3, 1, 1)  # [N, 1, H, W] -> [N, 3, H, W]
-            samples = F.interpolate(samples, size=(299, 299), mode='bilinear')  # Resize to 512x512
-            
-            # Normalize to [0, 1]
-            samples = (samples - samples.min()) / (samples.max() - samples.min())
-            
-            # Convert to numpy for saving
-            samples = samples.cpu().numpy()
-            
-            # Save individual images
-            for i in range(current_batch):
-                img = samples[i].transpose(1, 2, 0)
-                
-                # Save the image
-                plt.figure(figsize=(5, 5))
-                plt.imshow(img)
-                plt.axis('off')
-                plt.savefig(save_path / f"gen_{img_idx:04d}.png", bbox_inches='tight', pad_inches=0)
-                plt.close()
-                
-                img_idx += 1
-            
-            remaining -= current_batch
-        
-        print(f"Generated {num_images} images for FID evaluation in {generated_dir}")
-    
-    # Calculate FID
-    print(f"Calculating FID between real images in {real_dir} and generated images in {generated_dir}...")
-    fid_score = calculate_fid_from_dirs(real_dir, generated_dir, batch_size=batch_size, device=config['device'])
-    
-    print(f"FID Score: {fid_score:.4f} (lower is better)")
-    return fid_score
-
-def evaluate_fid_2(real_dir, generated_dir, checkpoint_path=None, num_images=64, batch_size=4, seed=None, use_ddim=False, ddim_steps=50, ddim_eta=0.0):
+def evaluate_fid(real_dir, generated_dir, checkpoint_path=None, num_images=64, batch_size=4, seed=None, use_ddim=False, ddim_steps=50, ddim_eta=0.0):
     # Calculate FID
     use_cuda = torch.cuda.is_available()
     if use_cuda:
@@ -478,7 +369,7 @@ def main():
         if args.real_dir is None:
             parser.error("--real_dir is required when using --evaluate_fid")
         
-        evaluate_fid_2(
+        evaluate_fid(
             real_dir=args.real_dir,
             generated_dir=args.generated_dir,
             checkpoint_path=args.checkpoint if args.generated_dir is None else None,
